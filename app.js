@@ -58,29 +58,26 @@ function home() {
   document.body.dataset.phase = 'home';
   const training = selected();
   if (!training) {
-    app.innerHTML = `<div class="shell"><header>${brand()}</header><span class="eyebrow">SEU RITMO. SEU TREINO.</span><h1>Seu próximo treino<br><em>começa aqui.</em></h1><p class="form-note">Crie um treino para configurar seus intervalos e começar.</p><button class="button primary" id="new-training">${icons.plus} Criar meu treino</button><footer>Os treinos ficam salvos neste aparelho.</footer></div>`;
+    app.innerHTML = `<div class="shell home-shell"><header>${brand()}</header><h1>Meus treinos</h1><p class="form-note">Nenhum treino salvo.</p><button class="button primary" id="new-training">${icons.plus} Criar treino</button></div>`;
     document.querySelector('#new-training').onclick = () => editor();
     return;
   }
   app.innerHTML = `
-    <div class="shell">
+    <div class="shell home-shell">
       <header>${brand()}<span class="header-note">INTERVAL TRAINING</span></header>
-      <section class="intro"><div><span class="eyebrow">SEU RITMO. SEU TREINO.</span><h1>Faça cada<br><em>segundo contar.</em></h1><p>Escolha seu treino. A contagem fica com a gente.</p></div></section>
       <div class="section-heading"><h2>Meus treinos <span class="count">${trainings.length}</span></h2><button class="button small secondary" id="new-training">${icons.plus} Novo treino</button></div>
       <div class="home-grid"><section class="training-list" aria-label="Treinos salvos">${trainings.map(t => `
         <article class="training-card ${t.id === selectedId ? 'selected' : ''}">
           <button class="training-select" data-select="${escape(t.id)}"><span class="card-top"><span class="eyebrow">INTERVALOS</span><span class="selection-dot"></span></span><h3>${escape(t.name)}</h3><div class="card-times"><strong>${formatTime(t.work)}</strong><span>/</span><strong class="muted">${formatTime(t.rest)}</strong></div><span class="card-bottom">${t.rounds} rounds <span>·</span> ${t.series} séries <span>·</span> ${formatTime(totalDuration(t))} total</span></button>
           <div class="card-actions"><button data-edit="${escape(t.id)}">Editar</button><button data-copy="${escape(t.id)}">Duplicar</button><button data-delete="${escape(t.id)}" aria-label="Excluir ${escape(t.name)}">Excluir</button></div>
         </article>`).join('')}</section>
-        <aside class="ready-panel"><span class="eyebrow">PRONTO PARA COMEÇAR</span><h2>${escape(training.name)}</h2><dl class="summary"><div><dt>Exercício</dt><dd>${formatTime(training.work)}</dd></div><div><dt>Descanso</dt><dd>${formatTime(training.rest)}</dd></div><div><dt>Rounds × séries</dt><dd>${training.rounds} × ${training.series}</dd></div><div><dt>Entre séries</dt><dd>${formatTime(training.recovery)}</dd></div><div><dt>Preparação</dt><dd>${formatTime(training.preparation)}</dd></div></dl><div class="total"><span>DURAÇÃO TOTAL</span><strong>${formatTime(totalDuration(training))}</strong></div><button class="button primary start-button" id="start">${icons.play} Iniciar treino</button><p class="panel-footnote">Bipes nos últimos 5 segundos.<br>O treino termina no último exercício.</p></aside>
       </div>
-      <footer><span class="status-dot"></span> <span id="connection-status">${navigator.onLine ? 'Treinos salvos neste aparelho' : 'Você está offline'}</span><button id="install-help">Como usar no iPhone</button></footer>
+      <footer class="start-footer"><button class="button primary start-button" id="start">${icons.play} Iniciar treino</button></footer>
       <div class="update-banner" ${updateWaiting ? '' : 'hidden'}><span>Uma nova versão está disponível.</span><button id="apply-update">Atualizar agora</button></div>
       ${!storageAvailable ? '<p class="notice">Armazenamento indisponível. Os treinos podem não ser preservados ao fechar.</p>' : ''}
     </div>`;
   document.querySelector('#start').onclick = () => startTraining(training);
   document.querySelector('#new-training').onclick = () => editor();
-  document.querySelector('#install-help').onclick = installHelp;
   document.querySelector('#apply-update').onclick = applyUpdate;
   app.querySelectorAll('[data-select]').forEach(button => button.onclick = () => { selectedId = button.dataset.select; persist(); home(); });
   app.querySelectorAll('[data-edit]').forEach(button => button.onclick = () => editor(trainings.find(t => t.id === button.dataset.edit)));
@@ -105,9 +102,6 @@ function editor(existing) {
   form.onsubmit = event => { event.preventDefault(); const value = read(); const error = validateTraining(value); if (error) { document.querySelector('#form-error').textContent = error; return; } if (existing) trainings = trainings.map(t => t.id === value.id ? value : t); else trainings.push(value); selectedId = value.id; persist(); home(); toast('Treino salvo.'); };
   document.querySelector('#back').onclick = home;
   app.querySelector('.brand').onclick = event => { event.preventDefault(); home(); };
-}
-function installHelp() {
-  confirmAction('Seu timer no iPhone', 'Abra o endereço publicado no Safari e use Compartilhar → Adicionar à Tela de Início. Abra pelo ícone e teste os bipes com sua música. O modo offline estará pronto após o primeiro carregamento completo. Os treinos ficam neste navegador; apagar os dados pode removê-los.');
 }
 function initAudio() {
   try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audioContext.resume().catch(() => toast('Não foi possível ativar o som. Teste o áudio no aparelho.')); } catch { toast('Este navegador não oferece os avisos sonoros.'); }
@@ -164,17 +158,14 @@ function finishSound() {
 }
 async function acquireWakeLock() {
   if (!session || session.paused || session.finished || document.hidden) return;
-  if (!('wakeLock' in navigator)) { updateWakeStatus('Tela acesa: recurso indisponível'); return; }
+  if (!('wakeLock' in navigator)) return;
   try {
     if (wakeLock && !wakeLock.released) return;
     wakeLock = await navigator.wakeLock.request('screen');
     if (!session || session.paused || session.finished || document.hidden) { releaseWakeLock(); return; }
-    updateWakeStatus('Tela acesa');
-    wakeLock.addEventListener('release', () => updateWakeStatus('Proteção da tela desativada'));
-  } catch { updateWakeStatus('Tela acesa: não autorizado pelo sistema'); }
+  } catch { /* The system can decline keeping the screen awake. */ }
 }
 function releaseWakeLock() { if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; } }
-function updateWakeStatus(value) { const element = document.querySelector('#wake-status'); if (element) element.textContent = value; }
 
 async function startTraining(training) {
   if (startingTraining) return;
@@ -191,7 +182,7 @@ async function startTraining(training) {
   renderTimer(); acquireWakeLock(); scheduleStepSounds(); tick();
 }
 function renderTimer() {
-  app.innerHTML = `<div class="timer-shell"><section class="timer-layout"><div class="timer-main"><div class="clock" id="clock" role="timer" aria-label="Tempo restante"></div></div><aside class="timer-side"><span id="paused-label" hidden>PAUSADO</span><div class="counter"><span>ROUND</span><strong><span id="round-current"></span><small> / ${session.training.rounds}</small></strong></div><div class="counter"><span>SÉRIE</span><strong><span id="series-current"></span><small> / ${session.training.series}</small></strong></div></aside></section><div class="timer-controls"><button class="button secondary" id="restart">↺ Reiniciar</button><button class="button primary pause-button" id="pause"></button><button class="button secondary" id="end">Encerrar ×</button></div><footer><span id="wake-status">Solicitando tela acesa…</span><span id="timer-hint">Sino nos últimos 5 segundos</span></footer></div>`;
+  app.innerHTML = `<div class="timer-shell"><section class="timer-layout"><div class="timer-main"><div class="clock" id="clock" role="timer" aria-label="Tempo restante"></div></div><aside class="timer-side"><span id="paused-label" hidden>PAUSADO</span><div class="counter"><span>ROUND</span><strong><span id="round-current"></span><small> / ${session.training.rounds}</small></strong></div><div class="counter"><span>SÉRIE</span><strong><span id="series-current"></span><small> / ${session.training.series}</small></strong></div></aside></section><div class="timer-controls"><button class="button secondary" id="restart">↺ Reiniciar</button><button class="button primary pause-button" id="pause"></button><button class="button secondary" id="end">Encerrar ×</button></div></div>`;
   document.querySelector('#pause').onclick = () => session.paused ? resumeTraining() : pauseTraining();
   document.querySelector('#restart').onclick = async () => {
     const wasPaused = session.paused; pauseTraining();
@@ -219,13 +210,12 @@ function pauseTraining(reason) {
   if (!session || session.paused || session.finished) return;
   session.remaining = Math.max(0, session.deadline - performance.now()); session.paused = true;
   cancelSounds(); releaseWakeLock(); updateTimer();
-  if (reason) { document.querySelector('#timer-hint').textContent = reason; toast(reason); }
+  if (reason) toast(reason);
 }
 function resumeTraining() {
   if (!session || session.finished || document.hidden) return;
   initAudio(); session.deadline = performance.now() + session.remaining; session.paused = false;
   cancelSounds(); scheduleStepSounds();
-  document.querySelector('#timer-hint').textContent = 'Bipes nos últimos 5 segundos';
   acquireWakeLock(); updateTimer();
 }
 function tick() {
@@ -253,8 +243,6 @@ function finishTraining() {
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) pauseTraining('Treino pausado ao sair. Toque em continuar para retomar.'); });
 window.addEventListener('pagehide', () => pauseTraining());
-window.addEventListener('online', () => { const status = document.querySelector('#connection-status'); if (status) status.textContent = 'Treinos salvos neste aparelho'; });
-window.addEventListener('offline', () => { const status = document.querySelector('#connection-status'); if (status) status.textContent = 'Você está offline'; });
 function applyUpdate() { if (updateWaiting && !session) updateWaiting.postMessage({ type: 'SKIP_WAITING' }); }
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
@@ -264,7 +252,6 @@ if ('serviceWorker' in navigator) {
       if (registration.waiting) announce();
       registration.addEventListener('updatefound', () => { const worker = registration.installing; worker?.addEventListener('statechange', () => { if (worker.state === 'installed' && navigator.serviceWorker.controller) announce(); }); });
       await navigator.serviceWorker.ready;
-      const status = document.querySelector('#connection-status'); if (status && navigator.onLine) status.textContent = 'Pronto para usar offline · salvo neste aparelho';
     } catch { toast('Modo offline ainda indisponível. Abra o timer publicado com internet.'); }
   });
   let refreshing = false;
