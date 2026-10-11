@@ -14,6 +14,8 @@ Abra o endereço HTTPS publicado no iPhone. No Safari, Compartilhar → Adiciona
 
 ## Funcionamento
 
+- Em **Testar som**, ouça Digital, Suave, Arcade e Sino. Cada opção tem testes separados de contagem (cinco bipes), fim do bloco e conclusão do treino. **Usar este som** salva uma escolha única para todos os treinos neste navegador, inclusive offline.
+
 - Treino inicial: 40s de exercício, 20s de descanso, 8 rounds, 4 séries, 120s entre séries e 5s de preparação. Total: 36:45 incluindo preparação.
 - Descanso longo substitui o descanso curto no último round. Nenhum descanso após o último exercício.
 - Bipes curtos nos últimos cinco segundos de cada etapa, agendados pelo relógio de áudio a partir do mesmo prazo da contagem visual. Etapas curtas usam os segundos disponíveis.

@@ -12,6 +12,14 @@ let updateWaiting = null;
 let storageAvailable = true;
 let soundEnabled = true;
 const activeTones = new Set();
+const soundProfiles = {
+  digital: { name: 'Digital', description: 'Curto e agudo, como um cronômetro.', wave: 'sine', frequency: 880, duration: 0.09, transition: 1320, finish: [660, 880, 1100] },
+  soft: { name: 'Suave', description: 'Mais grave, redondo e discreto.', wave: 'sine', frequency: 440, duration: 0.16, transition: 660, finish: [330, 440, 550] },
+  arcade: { name: 'Arcade', description: 'Eletrônico, com timbre de videogame.', wave: 'square', frequency: 740, duration: 0.08, transition: 1480, finish: [523, 659, 1047] },
+  bell: { name: 'Sino', description: 'Toque brilhante com ressonância.', wave: 'sine', frequency: 1047, duration: 0.35, transition: 1568, finish: [784, 1047, 1568], bell: true }
+};
+let soundProfile = 'digital';
+try { const savedSound = localStorage.getItem('timer-sound-v1'); if (soundProfiles[savedSound]) soundProfile = savedSound; } catch { /* Keep the default if storage is unavailable. */ }
 
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey));
@@ -112,18 +120,25 @@ function installHelp() {
 function initAudio() {
   try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audioContext.resume().catch(() => toast('Não foi possível ativar o som. Teste o áudio no aparelho.')); } catch { toast('Este navegador não oferece os avisos sonoros.'); }
 }
-function tone(frequency, duration, time = audioContext?.currentTime) {
+function tone(frequency, duration, time = audioContext?.currentTime, profile = soundProfiles[soundProfile]) {
   if (!soundEnabled || !audioContext) return;
   const oscillator = audioContext.createOscillator();
   const gain = audioContext.createGain();
+  oscillator.type = profile.wave;
   oscillator.frequency.value = frequency;
   oscillator.connect(gain); gain.connect(audioContext.destination);
   gain.gain.setValueAtTime(0, time);
-  gain.gain.linearRampToValueAtTime(0.2, time + 0.008);
+  gain.gain.linearRampToValueAtTime(profile.wave === 'square' ? 0.075 : 0.2, time + 0.008);
   gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
   activeTones.add(oscillator);
   oscillator.onended = () => { activeTones.delete(oscillator); oscillator.disconnect(); gain.disconnect(); };
   oscillator.start(time); oscillator.stop(time + duration + 0.01);
+  if (profile.bell) tone(frequency * 2.76, duration * 0.6, time, { ...profile, bell: false });
+}
+function playCue(kind, time = audioContext?.currentTime, profile = soundProfiles[soundProfile]) {
+  if (kind === 'countdown') tone(profile.frequency, profile.duration, time, profile);
+  else if (kind === 'transition') tone(profile.transition, Math.max(0.22, profile.duration), time, profile);
+  else profile.finish.forEach((frequency, index) => tone(frequency, profile.bell ? 0.35 : 0.18, time + index * 0.19, profile));
 }
 function cancelSounds() {
   for (const oscillator of activeTones) { try { oscillator.stop(); } catch { /* Already ended. */ } }
@@ -137,28 +152,52 @@ function scheduleStepSounds() {
   // Schedule against the same deadline as the visual clock, rather than each UI tick.
   for (let seconds = Math.min(5, Math.ceil(remaining)); seconds >= 1; seconds--) {
     const offset = remaining - seconds;
-    if (offset >= -0.1) tone(880, 0.09, audioNow + Math.max(0, offset));
+    if (offset >= -0.1) playCue('countdown', audioNow + Math.max(0, offset));
   }
   if (session.index < session.timeline.length - 1 && remaining > 0) {
-    tone(1320, 0.22, audioNow + remaining);
+    playCue('transition', audioNow + remaining);
   }
 }
 function testSound() {
-  initAudio();
-  if (!audioContext) return;
   cancelSounds();
-  const wasEnabled = soundEnabled;
-  soundEnabled = true;
-  tone(880, 0.09, audioContext.currentTime + 0.05);
-  tone(1320, 0.22, audioContext.currentTime + 0.55);
-  soundEnabled = wasEnabled;
-  toast('Teste: bip curto de contagem e bip de troca de etapa.');
+  app.innerHTML = `<div class="shell sound-shell"><header>${brand()}<button class="button small secondary" id="back">${icons.arrow} Voltar</button></header><span class="eyebrow">ENCONTRE SEU SOM</span><h1>Ouça. Escolha.<br><em>Entre no ritmo.</em></h1><p class="form-note">Escolha uma opção para todos os treinos. Ouça a contagem, a troca de bloco e o encerramento antes de decidir.</p><div class="sound-grid">${Object.entries(soundProfiles).map(([id, profile]) => `<article class="sound-card ${soundProfile === id ? 'selected' : ''}" data-profile="${id}"><div class="sound-heading"><h2>${profile.name}</h2><span class="eyebrow selection-label">${soundProfile === id ? 'EM USO' : ''}</span></div><p>${profile.description}</p><div class="sound-previews"><button class="button small secondary" data-preview="${id}" data-cue="countdown">${icons.sound} Contagem</button><button class="button small secondary" data-preview="${id}" data-cue="transition">${icons.sound} Fim do bloco</button><button class="button small secondary" data-preview="${id}" data-cue="finish">${icons.sound} Fim do treino</button></div><button class="button ${soundProfile === id ? 'primary' : 'secondary'} choose-sound" data-choose="${id}">${soundProfile === id ? 'Som selecionado ✓' : 'Usar este som'}</button></article>`).join('')}</div><p class="form-note" role="status" id="sound-feedback">Som atual: ${soundProfiles[soundProfile].name}. A escolha fica salva neste aparelho.</p></div>`;
+  document.querySelector('#back').onclick = () => { cancelSounds(); home(); };
+  app.querySelector('.brand').onclick = event => { event.preventDefault(); cancelSounds(); home(); };
+  app.querySelectorAll('[data-preview]').forEach(button => button.onclick = async () => {
+    initAudio();
+    if (!audioContext) return;
+    try { await audioContext.resume(); } catch { toast('Não foi possível ativar o som.'); return; }
+    if (!button.isConnected || document.hidden) return;
+    cancelSounds();
+    const wasEnabled = soundEnabled;
+    soundEnabled = true;
+    const profile = soundProfiles[button.dataset.preview];
+    const start = audioContext.currentTime + 0.03;
+    if (button.dataset.cue === 'countdown') {
+      for (let index = 0; index < 5; index++) playCue('countdown', start + index, profile);
+    } else playCue(button.dataset.cue, start, profile);
+    soundEnabled = wasEnabled;
+    document.querySelector('#sound-feedback').textContent = `Ouvindo ${profile.name}: ${button.dataset.cue === 'countdown' ? '5 bipes, um por segundo' : button.dataset.cue === 'transition' ? 'fim do bloco / troca de etapa' : 'encerramento do treino'}.`;
+  });
+  app.querySelectorAll('[data-choose]').forEach(button => button.onclick = () => {
+    soundProfile = button.dataset.choose;
+    try { localStorage.setItem('timer-sound-v1', soundProfile); } catch { toast('Escolha aplicada, mas não foi possível salvar neste aparelho.'); }
+    for (const card of app.querySelectorAll('[data-profile]')) {
+      const isSelected = card.dataset.profile === soundProfile;
+      card.classList.toggle('selected', isSelected);
+      card.querySelector('.selection-label').textContent = isSelected ? 'EM USO' : '';
+      const choose = card.querySelector('[data-choose]');
+      choose.classList.toggle('primary', isSelected); choose.classList.toggle('secondary', !isSelected);
+      choose.textContent = isSelected ? 'Som selecionado ✓' : 'Usar este som';
+      choose.setAttribute('aria-pressed', String(isSelected));
+    }
+    document.querySelector('#sound-feedback').textContent = `Som atual: ${soundProfiles[soundProfile].name}.`;
+    toast(`${soundProfiles[soundProfile].name} selecionado para os treinos.`);
+  });
 }
 function finishSound() {
   if (!soundEnabled || !audioContext) return;
-  [660, 880, 1100].forEach((frequency, index) => {
-    tone(frequency, 0.18, audioContext.currentTime + index * 0.19);
-  });
+  playCue('finish');
 }
 async function acquireWakeLock() {
   if (!session || session.paused || session.finished || document.hidden) return;
