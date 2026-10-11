@@ -14,15 +14,15 @@ Abra o endereço HTTPS publicado no iPhone. No Safari, Compartilhar → Adiciona
 
 ## Funcionamento
 
-- Em **Testar som**, ouça Digital, Suave, Arcade e Sino. Cada opção tem testes separados de contagem (cinco bipes), fim do bloco e conclusão do treino. **Usar este som** salva uma escolha única para todos os treinos neste navegador, inclusive offline.
+- Sino é o único som fixo de todos os treinos. Não há tela de seleção, configuração ou teste de sons.
 
 - Treino inicial: 40s de exercício, 20s de descanso, 8 rounds, 4 séries, 120s entre séries e 5s de preparação. Total: 36:45 incluindo preparação.
 - Descanso longo substitui o descanso curto no último round. Nenhum descanso após o último exercício.
 - Bipes curtos nos últimos cinco segundos de cada etapa, agendados pelo relógio de áudio a partir do mesmo prazo da contagem visual. Etapas curtas usam os segundos disponíveis.
-- Um bip mais agudo e longo marca a troca de etapa; três notas ascendentes marcam a conclusão. O controle de som silencia todos os avisos. Pausar cancela os sons agendados, e continuar agenda os segundos restantes.
+- Duas batidas de Sino marcam a troca de etapa; três notas ascendentes marcam a conclusão. O Sino permanece ativo durante o treino. Pausar cancela os sons agendados, e continuar agenda os segundos restantes.
 - Ao sair da tela, o treino pausa; retome manualmente. Chamadas e interrupções do sistema precisam de validação no aparelho.
 - Treinos ficam no localStorage desse navegador, sem sincronização. Apagar os dados remove os treinos.
-- O service worker salva os arquivos para uso offline após o primeiro carregamento completo. Os bipes são gerados no aparelho, sem arquivos externos.
+- O service worker salva os arquivos para uso offline após o primeiro carregamento completo. O Sino é gerado no aparelho, sem arquivos de áudio ou acesso externo.
 - Wake Lock é solicitado durante o treino. O sistema pode recusá-lo ou liberá-lo. O status aparece na tela.
 - Música e avisos sonoros podem interagir de maneira diferente no iPhone; esse comportamento ainda precisa de validação no aparelho.
 

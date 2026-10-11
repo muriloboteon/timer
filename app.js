@@ -10,16 +10,10 @@ let audioContext;
 let toastTimeout;
 let updateWaiting = null;
 let storageAvailable = true;
-let soundEnabled = true;
+const soundEnabled = true;
 const activeTones = new Set();
-const soundProfiles = {
-  digital: { name: 'Digital', description: 'Curto e agudo, como um cronômetro.', wave: 'sine', frequency: 880, duration: 0.09, transition: 1320, finish: [660, 880, 1100] },
-  soft: { name: 'Suave', description: 'Mais grave, redondo e discreto.', wave: 'sine', frequency: 440, duration: 0.16, transition: 660, finish: [330, 440, 550] },
-  arcade: { name: 'Arcade', description: 'Eletrônico, com timbre de videogame.', wave: 'square', frequency: 740, duration: 0.08, transition: 1480, finish: [523, 659, 1047] },
-  bell: { name: 'Sino', description: 'Toque brilhante com ressonância.', wave: 'sine', frequency: 1047, duration: 0.35, transition: 1568, finish: [784, 1047, 1568], bell: true }
-};
-let soundProfile = 'digital';
-try { const savedSound = localStorage.getItem('timer-sound-v1'); if (soundProfiles[savedSound]) soundProfile = savedSound; } catch { /* Keep the default if storage is unavailable. */ }
+const bellSound = { name: 'Sino', wave: 'sine', frequency: 1047, duration: 0.4, finish: [784, 1047, 1568], volume: 0.4, bell: true };
+let startingTraining = false;
 
 try {
   const saved = JSON.parse(localStorage.getItem(storageKey));
@@ -64,15 +58,14 @@ function home() {
   document.body.dataset.phase = 'home';
   const training = selected();
   if (!training) {
-    app.innerHTML = `<div class="shell"><header>${brand()}<button class="button small secondary" id="test-sound">${icons.sound} Testar som</button></header><span class="eyebrow">SEU RITMO. SEU TREINO.</span><h1>Seu próximo treino<br><em>começa aqui.</em></h1><p class="form-note">Crie um treino para configurar seus intervalos e começar.</p><button class="button primary" id="new-training">${icons.plus} Criar meu treino</button><footer>Os treinos ficam salvos neste aparelho.</footer></div>`;
+    app.innerHTML = `<div class="shell"><header>${brand()}</header><span class="eyebrow">SEU RITMO. SEU TREINO.</span><h1>Seu próximo treino<br><em>começa aqui.</em></h1><p class="form-note">Crie um treino para configurar seus intervalos e começar.</p><button class="button primary" id="new-training">${icons.plus} Criar meu treino</button><footer>Os treinos ficam salvos neste aparelho.</footer></div>`;
     document.querySelector('#new-training').onclick = () => editor();
-    document.querySelector('#test-sound').onclick = testSound;
     return;
   }
   app.innerHTML = `
     <div class="shell">
-      <header>${brand()}<span class="header-note">INTERVAL TRAINING</span><button class="button small secondary" id="test-sound">${icons.sound} Testar som</button></header>
-      <section class="intro"><div><span class="eyebrow">SEU RITMO. SEU TREINO.</span><h1>Faça cada<br><em>segundo contar.</em></h1><p>Escolha seu treino. A contagem fica com a gente.</p></div><div class="intro-mark" aria-hidden="true">↗</div></section>
+      <header>${brand()}<span class="header-note">INTERVAL TRAINING</span></header>
+      <section class="intro"><div><span class="eyebrow">SEU RITMO. SEU TREINO.</span><h1>Faça cada<br><em>segundo contar.</em></h1><p>Escolha seu treino. A contagem fica com a gente.</p></div></section>
       <div class="section-heading"><h2>Meus treinos <span class="count">${trainings.length}</span></h2><button class="button small secondary" id="new-training">${icons.plus} Novo treino</button></div>
       <div class="home-grid"><section class="training-list" aria-label="Treinos salvos">${trainings.map(t => `
         <article class="training-card ${t.id === selectedId ? 'selected' : ''}">
@@ -87,7 +80,6 @@ function home() {
     </div>`;
   document.querySelector('#start').onclick = () => startTraining(training);
   document.querySelector('#new-training').onclick = () => editor();
-  document.querySelector('#test-sound').onclick = testSound;
   document.querySelector('#install-help').onclick = installHelp;
   document.querySelector('#apply-update').onclick = applyUpdate;
   app.querySelectorAll('[data-select]').forEach(button => button.onclick = () => { selectedId = button.dataset.select; persist(); home(); });
@@ -120,7 +112,7 @@ function installHelp() {
 function initAudio() {
   try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audioContext.resume().catch(() => toast('Não foi possível ativar o som. Teste o áudio no aparelho.')); } catch { toast('Este navegador não oferece os avisos sonoros.'); }
 }
-function tone(frequency, duration, time = audioContext?.currentTime, profile = soundProfiles[soundProfile]) {
+function tone(frequency, duration, time = audioContext?.currentTime, profile = bellSound) {
   if (!soundEnabled || !audioContext) return;
   const oscillator = audioContext.createOscillator();
   const gain = audioContext.createGain();
@@ -128,17 +120,25 @@ function tone(frequency, duration, time = audioContext?.currentTime, profile = s
   oscillator.frequency.value = frequency;
   oscillator.connect(gain); gain.connect(audioContext.destination);
   gain.gain.setValueAtTime(0, time);
-  gain.gain.linearRampToValueAtTime(profile.wave === 'square' ? 0.075 : 0.2, time + 0.008);
+  gain.gain.linearRampToValueAtTime(profile.volume ?? (profile.wave === 'square' ? 0.075 : 0.2), time + 0.008);
   gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
   activeTones.add(oscillator);
   oscillator.onended = () => { activeTones.delete(oscillator); oscillator.disconnect(); gain.disconnect(); };
   oscillator.start(time); oscillator.stop(time + duration + 0.01);
-  if (profile.bell) tone(frequency * 2.76, duration * 0.6, time, { ...profile, bell: false });
+  if (profile.bell) tone(frequency * 2.76, duration * 0.6, time, { ...profile, bell: false, volume: (profile.volume ?? 0.2) * 0.25 });
+
 }
-function playCue(kind, time = audioContext?.currentTime, profile = soundProfiles[soundProfile]) {
+function playCue(kind, time = audioContext?.currentTime, profile = bellSound) {
+  if (profile.bell && kind === 'transition') {
+    // Two lower, resonant strikes mark the boundary distinctly from the countdown.
+    const transitionProfile = { ...profile, volume: (profile.volume ?? 0.2) * 0.7 };
+    tone(784, 0.55, time, transitionProfile);
+    tone(1047, 0.55, time + 0.18, transitionProfile);
+    return;
+  }
   if (kind === 'countdown') tone(profile.frequency, profile.duration, time, profile);
-  else if (kind === 'transition') tone(profile.transition, Math.max(0.22, profile.duration), time, profile);
-  else profile.finish.forEach((frequency, index) => tone(frequency, profile.bell ? 0.35 : 0.18, time + index * 0.19, profile));
+  else if (kind === 'transition') tone(profile.transition, profile.transitionDuration ?? Math.max(0.22, profile.duration), time, profile);
+  else profile.finish.forEach((frequency, index) => tone(frequency, profile.finishDuration ?? (profile.bell ? 0.35 : 0.18), time + index * (profile.finishDuration ? profile.finishDuration + 0.07 : 0.19), profile));
 }
 function cancelSounds() {
   for (const oscillator of activeTones) { try { oscillator.stop(); } catch { /* Already ended. */ } }
@@ -158,43 +158,6 @@ function scheduleStepSounds() {
     playCue('transition', audioNow + remaining);
   }
 }
-function testSound() {
-  cancelSounds();
-  app.innerHTML = `<div class="shell sound-shell"><header>${brand()}<button class="button small secondary" id="back">${icons.arrow} Voltar</button></header><span class="eyebrow">ENCONTRE SEU SOM</span><h1>Ouça. Escolha.<br><em>Entre no ritmo.</em></h1><p class="form-note">Escolha uma opção para todos os treinos. Ouça a contagem, a troca de bloco e o encerramento antes de decidir.</p><div class="sound-grid">${Object.entries(soundProfiles).map(([id, profile]) => `<article class="sound-card ${soundProfile === id ? 'selected' : ''}" data-profile="${id}"><div class="sound-heading"><h2>${profile.name}</h2><span class="eyebrow selection-label">${soundProfile === id ? 'EM USO' : ''}</span></div><p>${profile.description}</p><div class="sound-previews"><button class="button small secondary" data-preview="${id}" data-cue="countdown">${icons.sound} Contagem</button><button class="button small secondary" data-preview="${id}" data-cue="transition">${icons.sound} Fim do bloco</button><button class="button small secondary" data-preview="${id}" data-cue="finish">${icons.sound} Fim do treino</button></div><button class="button ${soundProfile === id ? 'primary' : 'secondary'} choose-sound" data-choose="${id}">${soundProfile === id ? 'Som selecionado ✓' : 'Usar este som'}</button></article>`).join('')}</div><p class="form-note" role="status" id="sound-feedback">Som atual: ${soundProfiles[soundProfile].name}. A escolha fica salva neste aparelho.</p></div>`;
-  document.querySelector('#back').onclick = () => { cancelSounds(); home(); };
-  app.querySelector('.brand').onclick = event => { event.preventDefault(); cancelSounds(); home(); };
-  app.querySelectorAll('[data-preview]').forEach(button => button.onclick = async () => {
-    initAudio();
-    if (!audioContext) return;
-    try { await audioContext.resume(); } catch { toast('Não foi possível ativar o som.'); return; }
-    if (!button.isConnected || document.hidden) return;
-    cancelSounds();
-    const wasEnabled = soundEnabled;
-    soundEnabled = true;
-    const profile = soundProfiles[button.dataset.preview];
-    const start = audioContext.currentTime + 0.03;
-    if (button.dataset.cue === 'countdown') {
-      for (let index = 0; index < 5; index++) playCue('countdown', start + index, profile);
-    } else playCue(button.dataset.cue, start, profile);
-    soundEnabled = wasEnabled;
-    document.querySelector('#sound-feedback').textContent = `Ouvindo ${profile.name}: ${button.dataset.cue === 'countdown' ? '5 bipes, um por segundo' : button.dataset.cue === 'transition' ? 'fim do bloco / troca de etapa' : 'encerramento do treino'}.`;
-  });
-  app.querySelectorAll('[data-choose]').forEach(button => button.onclick = () => {
-    soundProfile = button.dataset.choose;
-    try { localStorage.setItem('timer-sound-v1', soundProfile); } catch { toast('Escolha aplicada, mas não foi possível salvar neste aparelho.'); }
-    for (const card of app.querySelectorAll('[data-profile]')) {
-      const isSelected = card.dataset.profile === soundProfile;
-      card.classList.toggle('selected', isSelected);
-      card.querySelector('.selection-label').textContent = isSelected ? 'EM USO' : '';
-      const choose = card.querySelector('[data-choose]');
-      choose.classList.toggle('primary', isSelected); choose.classList.toggle('secondary', !isSelected);
-      choose.textContent = isSelected ? 'Som selecionado ✓' : 'Usar este som';
-      choose.setAttribute('aria-pressed', String(isSelected));
-    }
-    document.querySelector('#sound-feedback').textContent = `Som atual: ${soundProfiles[soundProfile].name}.`;
-    toast(`${soundProfiles[soundProfile].name} selecionado para os treinos.`);
-  });
-}
 function finishSound() {
   if (!soundEnabled || !audioContext) return;
   playCue('finish');
@@ -213,15 +176,22 @@ async function acquireWakeLock() {
 function releaseWakeLock() { if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; } }
 function updateWakeStatus(value) { const element = document.querySelector('#wake-status'); if (element) element.textContent = value; }
 
-const phaseLabels = { prepare: 'PREPARE-SE', work: 'EXERCÍCIO', rest: 'DESCANSO', recovery: 'ENTRE SÉRIES' };
-function startTraining(training) {
+async function startTraining(training) {
+  if (startingTraining) return;
+  startingTraining = true;
+  initAudio();
+  try {
+    if (audioContext) { await audioContext.resume(); }
+  } catch { toast('Não foi possível ativar o som. Confira o áudio do aparelho e tente novamente.'); startingTraining = false; return; }
+  startingTraining = false;
+  if (document.hidden) return;
   selectedId = training.id; persist(); initAudio(); cancelSounds();
   const timeline = createTimeline(training);
   session = { training: { ...training }, timeline, index: 0, remaining: timeline[0].duration * 1000, deadline: performance.now() + timeline[0].duration * 1000, paused: false, finished: false };
   renderTimer(); acquireWakeLock(); scheduleStepSounds(); tick();
 }
 function renderTimer() {
-  app.innerHTML = `<div class="timer-shell"><header><div class="timer-title"><span class="brand">Timer<span>●</span></span><span>${escape(session.training.name)}</span></div><button class="button small secondary" id="end">Encerrar ×</button></header><section class="timer-layout"><div class="timer-main"><div class="phase-label"><span class="phase-dot"></span><span id="phase-name"></span><span id="paused-label" hidden>PAUSADO</span></div><div class="clock" id="clock" role="timer" aria-label="Tempo restante"></div><div class="next-step" id="next-step"></div></div><aside class="timer-side"><div class="counter"><span>ROUND</span><strong><span id="round-current"></span><small> / ${session.training.rounds}</small></strong></div><div class="counter"><span>SÉRIE</span><strong><span id="series-current"></span><small> / ${session.training.series}</small></strong></div><div class="remaining-total"><span>RESTANTE NO TREINO</span><strong id="remaining-total"></strong></div></aside></section><div class="progress-track"><div id="progress-bar"></div></div><div class="timer-controls"><button class="button secondary" id="restart">↺ Reiniciar</button><button class="button primary pause-button" id="pause"></button><button class="button secondary" id="sound-toggle">${icons.sound}<span>Som ligado</span></button></div><footer><span id="wake-status">Solicitando tela acesa…</span><span id="timer-hint">Bipes nos últimos 5 segundos</span></footer></div>`;
+  app.innerHTML = `<div class="timer-shell"><section class="timer-layout"><div class="timer-main"><div class="clock" id="clock" role="timer" aria-label="Tempo restante"></div></div><aside class="timer-side"><span id="paused-label" hidden>PAUSADO</span><div class="counter"><span>ROUND</span><strong><span id="round-current"></span><small> / ${session.training.rounds}</small></strong></div><div class="counter"><span>SÉRIE</span><strong><span id="series-current"></span><small> / ${session.training.series}</small></strong></div></aside></section><div class="timer-controls"><button class="button secondary" id="restart">↺ Reiniciar</button><button class="button primary pause-button" id="pause"></button><button class="button secondary" id="end">Encerrar ×</button></div><footer><span id="wake-status">Solicitando tela acesa…</span><span id="timer-hint">Sino nos últimos 5 segundos</span></footer></div>`;
   document.querySelector('#pause').onclick = () => session.paused ? resumeTraining() : pauseTraining();
   document.querySelector('#restart').onclick = async () => {
     const wasPaused = session.paused; pauseTraining();
@@ -233,24 +203,16 @@ function renderTimer() {
     if (await confirmAction('Encerrar o treino?', 'O progresso desta sessão será descartado. Seus treinos salvos serão mantidos.')) { releaseWakeLock(); cancelSounds(); home(); }
     else if (!wasPaused) resumeTraining();
   };
-  document.querySelector('#sound-toggle').onclick = () => { soundEnabled = !soundEnabled; cancelSounds(); if (soundEnabled) { initAudio(); scheduleStepSounds(); } document.querySelector('#sound-toggle span').textContent = soundEnabled ? 'Som ligado' : 'Som desligado'; document.querySelector('#sound-toggle').setAttribute('aria-pressed', String(!soundEnabled)); };
-  document.querySelector('#sound-toggle span').textContent = soundEnabled ? 'Som ligado' : 'Som desligado';
   updateTimer();
 }
 function updateTimer() {
   if (!session || session.finished) return;
   const step = session.timeline[session.index];
   document.body.dataset.phase = step.type;
-  document.querySelector('#phase-name').textContent = phaseLabels[step.type];
   document.querySelector('#clock').textContent = formatTime(session.remaining / 1000);
   document.querySelector('#round-current').textContent = step.round;
   document.querySelector('#series-current').textContent = step.series;
   document.querySelector('#paused-label').hidden = !session.paused;
-  const next = session.timeline[session.index + 1];
-  document.querySelector('#next-step').textContent = next ? `A SEGUIR: ${phaseLabels[next.type]} · ${formatTime(next.duration)}` : 'ÚLTIMO ROUND · VOCÊ ESTÁ CHEGANDO LÁ';
-  const remaining = session.remaining / 1000 + session.timeline.slice(session.index + 1).reduce((sum, item) => sum + item.duration, 0);
-  document.querySelector('#remaining-total').textContent = formatTime(remaining);
-  document.querySelector('#progress-bar').style.width = `${100 * (1 - remaining / totalDuration(session.training))}%`;
   document.querySelector('#pause').innerHTML = session.paused ? `${icons.play} Continuar` : `${icons.pause} Pausar`;
 }
 function pauseTraining(reason) {
